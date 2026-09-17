@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1769e8">
+<title>BENZUCA AES</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#10131a;color:#f4f6f8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.app{width:min(760px,94vw);margin:25px auto 45px}
+header{text-align:center;margin-bottom:20px}
+.lock{width:78px;height:78px;margin:auto;border-radius:22px;display:grid;place-items:center;background:#1769e8;box-shadow:0 10px 30px #0006}
+h1{margin:13px 0 4px;font-size:28px}.sub{color:#aeb7c4;margin:0}
+.card{background:#171c24;border:1px solid #303846;border-radius:18px;padding:20px;margin:14px 0}
+label{display:block;font-weight:650;margin:0 0 8px}
+textarea,input{width:100%;border:1px solid #394352;border-radius:12px;background:#0e1218;color:#fff;padding:13px;font:inherit;outline:none}
+textarea{min-height:180px;resize:vertical}
+input:focus,textarea:focus{border-color:#6ea0ff}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+button{border:0;border-radius:11px;padding:13px 17px;font-weight:700;cursor:pointer;background:#fff;color:#111;min-height:46px}
+button.secondary{background:#303846;color:#fff}button:disabled{opacity:.5}
+.drop{border:2px dashed #4b5668;border-radius:14px;padding:22px;text-align:center;color:#b8c1cd;cursor:pointer;margin-top:12px}
+.file{margin-top:9px;color:#dce2ea;font-size:14px}
+.status{min-height:24px;margin-top:10px;color:#b9c4d2;white-space:pre-wrap}
+.success{color:#9ee6ad}.error{color:#ff9e9e}.hint{font-size:13px;color:#929dab;line-height:1.45}
+.hidden{display:none}.full{width:100%}
+</style>
+</head>
+<body>
+<main class="app">
+<header>
+<div class="lock">
+<svg width="45" height="52" viewBox="0 0 45 52">
+<rect x="6" y="21" width="33" height="27" rx="6" fill="white"/>
+<path d="M12 22V15C12 6 18 2 22.5 2S33 6 33 15v7h-6v-7c0-5-2-7-4.5-7S18 10 18 15v7z" fill="white"/>
+<circle cx="22.5" cy="34" r="4" fill="#1769e8"/>
+<rect x="21" y="34" width="3" height="8" rx="1.5" fill="#1769e8"/>
+</svg>
+</div>
+<h1>BENZUCA AES</h1>
+<p class="sub">Codificador local de textos e arquivos</p>
+</header>
+
+<section class="card">
+<label for="password">Palavra-chave</label>
+<input id="password" type="password" placeholder="Digite a palavra-chave">
+<p class="hint">AES-256-GCM com chave derivada por PBKDF2-SHA-256.</p>
+</section>
+
+<section class="card">
+<label for="text">Texto</label>
+<textarea id="text" placeholder="Digite ou cole o texto..."></textarea>
+
+<div class="drop" id="drop">
+📄 <b>Selecionar arquivo Word ou PDF</b><br>
+<span>Toque aqui ou arraste o arquivo</span>
+<input id="file" class="hidden" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+</div>
+<div class="file" id="fileInfo">Nenhum arquivo selecionado.</div>
+
+<div class="row" style="margin-top:15px">
+<button id="encrypt" class="full">🔐 Codificar com AES</button>
+<button id="clear" class="secondary">Limpar</button>
+</div>
+</section>
+
+<section class="card">
+<label for="result">Resultado codificado</label>
+<textarea id="result" readonly placeholder="O código BZA1 aparecerá aqui..."></textarea>
+<div class="row" style="margin-top:10px">
+<button id="copy" class="secondary">Copiar código</button>
+<button id="save">Salvar .BZA</button>
+</div>
+</section>
+
+<section class="card">
+<label for="decode">Código para decodificar</label>
+<textarea id="decode" placeholder="Cole aqui um código BZA1..."></textarea>
+<button id="decrypt" class="full" style="margin-top:10px">🔓 Decodificar</button>
+<div id="status" class="status"></div>
+</section>
+
+<p class="hint">O conteúdo é processado no próprio navegador. Nenhum servidor é necessário para a criptografia.</p>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const ITER=600000;
+let chosen=null;
+
+function status(msg,cls=""){ $("status").textContent=msg; $("status").className="status "+cls; }
+
+function b64(bytes){
+  let s="";
+  for(let i=0;i<bytes.length;i+=0x8000)
+    s+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));
+  return btoa(s);
+}
+function bytes(s){
+  const b=atob(s),a=new Uint8Array(b.length);
+  for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);
+  return a;
+}
+function enc64(a){return b64(a).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")}
+function dec64(s){
+  s=s.replace(/-/g,"+").replace(/_/g,"/");
+  while(s.length%4)s+="=";
+  return bytes(s);
+}
+async function makeKey(password,salt){
+  const base=await crypto.subtle.importKey(
+    "raw",new TextEncoder().encode(password),"PBKDF2",false,["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    {name:"PBKDF2",salt:salt,iterations:ITER,hash:"SHA-256"},
+    base,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]
+  );
+}
+
+$("drop").onclick=()=> $("file").click();
+$("file").onchange=e=>{
+  const f=e.target.files[0];
+  if(!f)return;
+  if(!/\.(pdf|doc|docx)$/i.test(f.name)){
+    status("Arquivo não suportado. Use PDF, DOC ou DOCX.","error"); return;
+  }
+  chosen=f;
+  $("text").value="";
+  $("fileInfo").textContent="Arquivo: "+f.name;
+  status("");
+};
+
+$("encrypt").onclick=async()=>{
+  try{
+    if(!window.crypto||!crypto.subtle)
+      throw new Error("Este navegador não permite criptografia nesta forma de abertura. Abra o HTML no Safari ou Chrome.");
+    const password=$("password").value;
+    if(!password)throw new Error("Digite uma palavra-chave.");
+
+    $("encrypt").disabled=true;
+    status("Codificando...");
+
+    let obj;
+    if(chosen){
+      const data=new Uint8Array(await chosen.arrayBuffer());
+      obj={v:1,type:"file",name:chosen.name,mime:chosen.type||"application/octet-stream",data:b64(data)};
+    }else{
+      const text=$("text").value;
+      if(!text)throw new Error("Digite um texto ou selecione um arquivo.");
+      obj={v:1,type:"text",text:text};
+    }
+
+    const salt=crypto.getRandomValues(new Uint8Array(16));
+    const iv=crypto.getRandomValues(new Uint8Array(12));
+    const key=await makeKey(password,salt);
+    const plain=new TextEncoder().encode(JSON.stringify(obj));
+    const cipher=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv:iv},key,plain));
+
+    $("result").value="BZA1:"+enc64(salt)+":"+enc64(iv)+":"+enc64(cipher);
+    status("Codificação concluída com sucesso.","success");
+  }catch(e){status(e.message||"Erro ao codificar.","error")}
+  finally{$("encrypt").disabled=false}
+};
+
+$("decrypt").onclick=async()=>{
+  try{
+    const password=$("password").value;
+    const input=$("decode").value.trim();
+    if(!password)throw new Error("Digite a palavra-chave.");
+    const p=input.split(":");
+    if(p.length!==4||p[0]!=="BZA1")throw new Error("Código BZA1 inválido.");
+
+    status("Decodificando...");
+    const key=await makeKey(password,dec64(p[1]));
+    const plain=await crypto.subtle.decrypt(
+      {name:"AES-GCM",iv:dec64(p[2])},key,dec64(p[3])
+    );
+    const obj=JSON.parse(new TextDecoder().decode(plain));
+
+    if(obj.type==="text"){
+      $("text").value=obj.text;
+      chosen=null;
+      $("fileInfo").textContent="Texto decodificado.";
+      status("Texto decodificado com sucesso.","success");
+    }else{
+      const data=bytes(obj.data);
+      const blob=new Blob([data],{type:obj.mime||"application/octet-stream"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url;a.download=obj.name||"arquivo_decodificado";a.click();
+      setTimeout(()=>URL.revokeObjectURL(url),3000);
+      status("Arquivo decodificado. O arquivo foi disponibilizado para abertura/salvamento.","success");
+    }
+  }catch(e){status("Não foi possível decodificar. Verifique a palavra-chave e o código.","error")}
+};
+
+$("copy").onclick=async()=>{
+  if(!$("result").value)return;
+  try{
+    await navigator.clipboard.writeText($("result").value);
+  }catch{
+    $("result").select();document.execCommand("copy");
+  }
+  status("Código copiado.","success");
+};
+
+$("save").onclick=()=>{
+  if(!$("result").value)return;
+  const blob=new Blob([$("result").value],{type:"text/plain;charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download="BENZUCA-AES.bza";a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),2000);
+};
+
+$("clear").onclick=()=>{
+  $("password").value="";
+  $("text").value="";
+  $("result").value="";
+  $("decode").value="";
+  $("file").value="";
+  chosen=null;
+  $("fileInfo").textContent="Nenhum arquivo selecionado.";
+  status("");
+};
+</script>
+</body>
+</html>
